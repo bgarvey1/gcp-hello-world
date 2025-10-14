@@ -1,10 +1,9 @@
-FROM python:3.12-slim
+FROM nginx:alpine
 
-WORKDIR /app
+COPY *.html /usr/share/nginx/html/
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+EXPOSE 8080
 
-COPY main.py .
+RUN sed -i 's/listen\s*80;/listen 8080;/' /etc/nginx/conf.d/default.conf
 
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 main:app
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - Simple Website</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #4285f4;
+        }
+        a {
+            color: #4285f4;
+            text-decoration: none;
+            margin-right: 20px;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .nav {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>About This Site</h1>
+        
+        <div class="nav">
+            <h3>Navigation:</h3>
+            <a href="index.html">Home</a>
+            <a href="about.html">About</a>
+            <a href="contact.html">Contact</a>
+        </div>
+        
+        <p>This is a simple demonstration of hosting static HTML files on Google Cloud Storage.</p>
+        <p>No backend servers required - just pure HTML, CSS, and files stored in the cloud!</p>
+        
+        <h3>How it works:</h3>
+        <ul>
+            <li>HTML files are stored in a Google Cloud Storage bucket</li>
+            <li>The bucket is configured for static website hosting</li>
+            <li>Files are served directly to your browser</li>
+            <li>Much simpler than containers and servers!</li>
+        </ul>
+    </div>
+</body>
+</html>
