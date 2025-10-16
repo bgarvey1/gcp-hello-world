@@ -23,6 +23,12 @@ if 'mcp_tools' not in st.session_state:
 if 'mcp_initialized' not in st.session_state:
     st.session_state.mcp_initialized = False
 
+if 'event_loop' not in st.session_state:
+    st.session_state.event_loop = None
+
+if 'stdio_context' not in st.session_state:
+    st.session_state.stdio_context = None
+
 
 async def start_mcp_server():
     """Start MCP server and connect to it."""
@@ -46,7 +52,7 @@ async def start_mcp_server():
     
     tools_result = await session.list_tools()
     
-    return session, tools_result.tools
+    return session, tools_result.tools, stdio_context
 
 
 def convert_mcp_tools_to_anthropic(mcp_tools):
@@ -67,8 +73,14 @@ st.write("Chat with Anthropic's Claude AI model using MCP (Model Context Protoco
 if st.session_state.api_key and not st.session_state.mcp_initialized:
     try:
         with st.spinner("Starting MCP server..."):
-            session, mcp_tools = asyncio.run(start_mcp_server())
+            if st.session_state.event_loop is None:
+                st.session_state.event_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(st.session_state.event_loop)
+            
+            loop = st.session_state.event_loop
+            session, mcp_tools, stdio_context = loop.run_until_complete(start_mcp_server())
             st.session_state.mcp_session = session
+            st.session_state.stdio_context = stdio_context
             st.session_state.mcp_tools = convert_mcp_tools_to_anthropic(mcp_tools)
             st.session_state.mcp_initialized = True
             
@@ -149,7 +161,7 @@ if prompt := st.chat_input("Type your message..."):
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    result = asyncio.run(
+                    result = st.session_state.event_loop.run_until_complete(
                         st.session_state.mcp_session.call_tool(
                             block.name,
                             arguments=block.input
