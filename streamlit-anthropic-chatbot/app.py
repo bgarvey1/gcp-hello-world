@@ -141,6 +141,7 @@ if prompt := st.chat_input("Type your message..."):
         response = st.session_state.client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=8096,
+            system="You are a helpful AI assistant with access to supplemental tools. Use your baseline knowledge and capabilities to answer questions. Only call tools when they would provide specific additional value beyond your built-in knowledge.",
             messages=st.session_state.messages,
             tools=st.session_state.mcp_tools
         )
@@ -187,6 +188,7 @@ if prompt := st.chat_input("Type your message..."):
             response = st.session_state.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=8096,
+                system="You are a helpful AI assistant with access to supplemental tools. Use your baseline knowledge and capabilities to answer questions. Only call tools when they would provide specific additional value beyond your built-in knowledge.",
                 messages=st.session_state.messages,
                 tools=st.session_state.mcp_tools
             )
