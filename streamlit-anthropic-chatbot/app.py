@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import asyncio
 import sys
+from datetime import datetime
 
 st.set_page_config(page_title="Claude Chatbot with MCP Tools", page_icon="🤖")
 
@@ -93,6 +94,12 @@ def convert_mcp_tools_to_anthropic(mcp_tools):
     return anthropic_tools
 
 
+def get_system_prompt():
+    """Generate system prompt with current date."""
+    current_date = datetime.utcnow().strftime("%B %d, %Y")
+    return f"You are a helpful AI assistant with access to supplemental tools. The current date is {current_date}. Use your baseline knowledge and capabilities to answer questions. Only call tools when they would provide specific additional value beyond your built-in knowledge."
+
+
 st.title("🤖 Claude Chatbot with MCP Tools")
 st.write("Chat with Anthropic's Claude AI model using MCP (Model Context Protocol)")
 
@@ -167,7 +174,7 @@ if prompt := st.chat_input("Type your message..."):
         response = st.session_state.client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=8096,
-            system="You are a helpful AI assistant with access to supplemental tools. Use your baseline knowledge and capabilities to answer questions. Only call tools when they would provide specific additional value beyond your built-in knowledge.",
+            system=get_system_prompt(),
             messages=st.session_state.messages,
             tools=st.session_state.mcp_tools
         )
@@ -223,7 +230,7 @@ if prompt := st.chat_input("Type your message..."):
             response = st.session_state.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=8096,
-                system="You are a helpful AI assistant with access to supplemental tools. Use your baseline knowledge and capabilities to answer questions. Only call tools when they would provide specific additional value beyond your built-in knowledge.",
+                system=get_system_prompt(),
                 messages=st.session_state.messages,
                 tools=st.session_state.mcp_tools
             )
