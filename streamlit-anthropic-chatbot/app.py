@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 
-st.set_page_config(page_title="Claude Chatbot", page_icon="🤖")
+st.set_page_config(page_title="Claude Chatbot with Tools", page_icon="🤖")
 
 if 'api_key' not in st.session_state:
     st.session_state.api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -12,8 +12,33 @@ if 'client' not in st.session_state:
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
-st.title("🤖 Claude Chatbot")
+def calculate_sum(a: float, b: float) -> float:
+    return a + b
+
+tools = [
+    {
+        "name": "calculate_sum",
+        "description": "Calculate the sum of two numbers. Use this when the user asks you to add numbers together.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "a": {
+                    "type": "number",
+                    "description": "The first number to add"
+                },
+                "b": {
+                    "type": "number",
+                    "description": "The second number to add"
+                }
+            },
+            "required": ["a", "b"]
+        }
+    }
+]
+
+st.title("🤖 Claude Chatbot with Tools")
 st.write("Chat with Anthropic's Claude AI model")
+st.info("🔧 Tool available: calculate_sum - Can add two numbers together")
 
 if not st.session_state.api_key:
     st.warning("⚠️ No API key found in environment variables.")
@@ -46,7 +71,13 @@ if st.session_state.client is None:
 
 for message in st.session_state.messages:
     with st.chat_message(message['role']):
-        st.write(message['content'])
+        if isinstance(message['content'], str):
+            st.write(message['content'])
+        elif isinstance(message['content'], list):
+            for item in message['content']:
+                if isinstance(item, dict) and item.get('type') == 'tool_result':
+                    continue
+                st.write(str(item))
 
 if prompt := st.chat_input("Type your message..."):
     st.session_state.messages.append({'role': 'user', 'content': prompt})
@@ -57,13 +88,58 @@ if prompt := st.chat_input("Type your message..."):
         response = st.session_state.client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=8096,
-            messages=st.session_state.messages
+            messages=st.session_state.messages,
+            tools=tools
         )
-        assistant_message = response.content[0].text
+        
+        while response.stop_reason == "tool_use":
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response.content
+            })
+            
+            with st.chat_message('assistant'):
+                for block in response.content:
+                    if hasattr(block, 'text'):
+                        st.write(block.text)
+                    elif block.type == "tool_use":
+                        st.info(f"🔧 Calling tool: {block.name} with inputs: {block.input}")
+            
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    if block.name == "calculate_sum":
+                        result = calculate_sum(
+                            a=block.input["a"],
+                            b=block.input["b"]
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": str(result)
+                        })
+            
+            st.session_state.messages.append({
+                "role": "user",
+                "content": tool_results
+            })
+            
+            response = st.session_state.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=8096,
+                messages=st.session_state.messages,
+                tools=tools
+            )
+        
+        assistant_message = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                assistant_message += block.text
         
         st.session_state.messages.append({'role': 'assistant', 'content': assistant_message})
         with st.chat_message('assistant'):
             st.write(assistant_message)
+            
     except Exception as e:
         st.error(f"Error getting response from Claude: {str(e)}")
         if st.button("Reset API Key"):
