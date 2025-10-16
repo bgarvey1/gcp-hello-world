@@ -14,8 +14,8 @@ if 'client' not in st.session_state:
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
-if 'mcp_session' not in st.session_state:
-    st.session_state.mcp_session = None
+if 'mcp_sessions' not in st.session_state:
+    st.session_state.mcp_sessions = {}
 
 if 'mcp_tools' not in st.session_state:
     st.session_state.mcp_tools = []
@@ -26,33 +26,59 @@ if 'mcp_initialized' not in st.session_state:
 if 'event_loop' not in st.session_state:
     st.session_state.event_loop = None
 
-if 'stdio_context' not in st.session_state:
-    st.session_state.stdio_context = None
+if 'stdio_contexts' not in st.session_state:
+    st.session_state.stdio_contexts = []
 
 
-async def start_mcp_server():
-    """Start MCP server and connect to it."""
+async def start_mcp_servers():
+    """Start all MCP servers and connect to them."""
     from mcp.client.stdio import StdioServerParameters, stdio_client
     from mcp.client.session import ClientSession
     
+    sessions = {}
+    all_tools = []
+    contexts = []
+    
     server_script = os.path.join(os.path.dirname(__file__), "mcp_server.py")
     
-    server_params = StdioServerParameters(
+    calc_params = StdioServerParameters(
         command=sys.executable,
         args=[server_script],
     )
     
-    stdio_context = stdio_client(server_params)
-    read_stream, write_stream = await stdio_context.__aenter__()
+    calc_context = stdio_client(calc_params)
+    calc_read, calc_write = await calc_context.__aenter__()
+    calc_session = ClientSession(calc_read, calc_write)
+    await calc_session.__aenter__()
+    await calc_session.initialize()
+    calc_tools = await calc_session.list_tools()
     
-    session = ClientSession(read_stream, write_stream)
+    for tool in calc_tools.tools:
+        sessions[tool.name] = calc_session
+    all_tools.extend(calc_tools.tools)
+    contexts.append(calc_context)
     
-    await session.__aenter__()
-    await session.initialize()
+    brave_api_key = os.environ.get('BRAVE_API_KEY')
+    if brave_api_key:
+        brave_params = StdioServerParameters(
+            command="npx",
+            args=["-y", "@brave/brave-search-mcp-server"],
+            env={"BRAVE_API_KEY": brave_api_key}
+        )
+        
+        brave_context = stdio_client(brave_params)
+        brave_read, brave_write = await brave_context.__aenter__()
+        brave_session = ClientSession(brave_read, brave_write)
+        await brave_session.__aenter__()
+        await brave_session.initialize()
+        brave_tools = await brave_session.list_tools()
+        
+        for tool in brave_tools.tools:
+            sessions[tool.name] = brave_session
+        all_tools.extend(brave_tools.tools)
+        contexts.append(brave_context)
     
-    tools_result = await session.list_tools()
-    
-    return session, tools_result.tools, stdio_context
+    return sessions, all_tools, contexts
 
 
 def convert_mcp_tools_to_anthropic(mcp_tools):
@@ -72,22 +98,22 @@ st.write("Chat with Anthropic's Claude AI model using MCP (Model Context Protoco
 
 if st.session_state.api_key and not st.session_state.mcp_initialized:
     try:
-        with st.spinner("Starting MCP server..."):
+        with st.spinner("Starting MCP servers..."):
             if st.session_state.event_loop is None:
                 st.session_state.event_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(st.session_state.event_loop)
             
             loop = st.session_state.event_loop
-            session, mcp_tools, stdio_context = loop.run_until_complete(start_mcp_server())
-            st.session_state.mcp_session = session
-            st.session_state.stdio_context = stdio_context
+            sessions, mcp_tools, stdio_contexts = loop.run_until_complete(start_mcp_servers())
+            st.session_state.mcp_sessions = sessions
+            st.session_state.stdio_contexts = stdio_contexts
             st.session_state.mcp_tools = convert_mcp_tools_to_anthropic(mcp_tools)
             st.session_state.mcp_initialized = True
             
             for tool in st.session_state.mcp_tools:
                 st.success(f"🔧 MCP Tool available: {tool['name']} - {tool['description']}")
     except Exception as e:
-        st.error(f"Failed to start MCP server: {str(e)}")
+        st.error(f"Failed to start MCP servers: {str(e)}")
         st.error(f"Error details: {type(e).__name__}")
         import traceback
         st.error(traceback.format_exc())
@@ -162,23 +188,32 @@ if prompt := st.chat_input("Type your message..."):
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    result = st.session_state.event_loop.run_until_complete(
-                        st.session_state.mcp_session.call_tool(
-                            block.name,
-                            arguments=block.input
+                    session = st.session_state.mcp_sessions.get(block.name)
+                    if session:
+                        result = st.session_state.event_loop.run_until_complete(
+                            session.call_tool(
+                                block.name,
+                                arguments=block.input
+                            )
                         )
-                    )
-                    
-                    result_content = ""
-                    for content_item in result.content:
-                        if hasattr(content_item, 'text'):
-                            result_content += content_item.text
-                    
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result_content
-                    })
+                        
+                        result_content = ""
+                        for content_item in result.content:
+                            if hasattr(content_item, 'text'):
+                                result_content += content_item.text
+                        
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result_content
+                        })
+                    else:
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": f"Error: Tool {block.name} not found",
+                            "is_error": True
+                        })
             
             st.session_state.messages.append({
                 "role": "user",
