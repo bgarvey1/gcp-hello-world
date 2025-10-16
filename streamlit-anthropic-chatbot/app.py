@@ -1,7 +1,9 @@
 import streamlit as st
 import os
+import asyncio
+import sys
 
-st.set_page_config(page_title="Claude Chatbot with Tools", page_icon="🤖")
+st.set_page_config(page_title="Claude Chatbot with MCP Tools", page_icon="🤖")
 
 if 'api_key' not in st.session_state:
     st.session_state.api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -12,33 +14,70 @@ if 'client' not in st.session_state:
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
-def calculate_sum(a: float, b: float) -> float:
-    return a + b
+if 'mcp_session' not in st.session_state:
+    st.session_state.mcp_session = None
 
-tools = [
-    {
-        "name": "calculate_sum",
-        "description": "Calculate the sum of two numbers. Use this when the user asks you to add numbers together.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "a": {
-                    "type": "number",
-                    "description": "The first number to add"
-                },
-                "b": {
-                    "type": "number",
-                    "description": "The second number to add"
-                }
-            },
-            "required": ["a", "b"]
-        }
-    }
-]
+if 'mcp_tools' not in st.session_state:
+    st.session_state.mcp_tools = []
 
-st.title("🤖 Claude Chatbot with Tools")
-st.write("Chat with Anthropic's Claude AI model")
-st.info("🔧 Tool available: calculate_sum - Can add two numbers together")
+if 'mcp_initialized' not in st.session_state:
+    st.session_state.mcp_initialized = False
+
+
+async def start_mcp_server():
+    """Start MCP server and connect to it."""
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+    from mcp.client.session import ClientSession
+    
+    server_script = os.path.join(os.path.dirname(__file__), "mcp_server.py")
+    
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[server_script],
+    )
+    
+    read_stream, write_stream = await stdio_client(server_params)
+    session = ClientSession(read_stream, write_stream)
+    
+    await session.__aenter__()
+    await session.initialize()
+    
+    tools_result = await session.list_tools()
+    
+    return session, tools_result.tools
+
+
+def convert_mcp_tools_to_anthropic(mcp_tools):
+    """Convert MCP tool format to Anthropic tool format."""
+    anthropic_tools = []
+    for tool in mcp_tools:
+        anthropic_tools.append({
+            "name": tool.name,
+            "description": tool.description or "",
+            "input_schema": tool.inputSchema
+        })
+    return anthropic_tools
+
+
+st.title("🤖 Claude Chatbot with MCP Tools")
+st.write("Chat with Anthropic's Claude AI model using MCP (Model Context Protocol)")
+
+if st.session_state.api_key and not st.session_state.mcp_initialized:
+    try:
+        with st.spinner("Starting MCP server..."):
+            session, mcp_tools = asyncio.run(start_mcp_server())
+            st.session_state.mcp_session = session
+            st.session_state.mcp_tools = convert_mcp_tools_to_anthropic(mcp_tools)
+            st.session_state.mcp_initialized = True
+            
+            for tool in st.session_state.mcp_tools:
+                st.success(f"🔧 MCP Tool available: {tool['name']} - {tool['description']}")
+    except Exception as e:
+        st.error(f"Failed to start MCP server: {str(e)}")
+        st.error(f"Error details: {type(e).__name__}")
+        import traceback
+        st.error(traceback.format_exc())
+        st.stop()
 
 if not st.session_state.api_key:
     st.warning("⚠️ No API key found in environment variables.")
@@ -89,7 +128,7 @@ if prompt := st.chat_input("Type your message..."):
             model="claude-3-5-sonnet-20241022",
             max_tokens=8096,
             messages=st.session_state.messages,
-            tools=tools
+            tools=st.session_state.mcp_tools
         )
         
         while response.stop_reason == "tool_use":
@@ -103,21 +142,28 @@ if prompt := st.chat_input("Type your message..."):
                     if hasattr(block, 'text'):
                         st.write(block.text)
                     elif block.type == "tool_use":
-                        st.info(f"🔧 Calling tool: {block.name} with inputs: {block.input}")
+                        st.info(f"🔧 Calling MCP tool: {block.name} with inputs: {block.input}")
             
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    if block.name == "calculate_sum":
-                        result = calculate_sum(
-                            a=block.input["a"],
-                            b=block.input["b"]
+                    result = asyncio.run(
+                        st.session_state.mcp_session.call_tool(
+                            block.name,
+                            arguments=block.input
                         )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": str(result)
-                        })
+                    )
+                    
+                    result_content = ""
+                    for content_item in result.content:
+                        if hasattr(content_item, 'text'):
+                            result_content += content_item.text
+                    
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_content
+                    })
             
             st.session_state.messages.append({
                 "role": "user",
@@ -128,7 +174,7 @@ if prompt := st.chat_input("Type your message..."):
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=8096,
                 messages=st.session_state.messages,
-                tools=tools
+                tools=st.session_state.mcp_tools
             )
         
         assistant_message = ""
@@ -142,7 +188,10 @@ if prompt := st.chat_input("Type your message..."):
             
     except Exception as e:
         st.error(f"Error getting response from Claude: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         if st.button("Reset API Key"):
             st.session_state.api_key = None
             st.session_state.client = None
+            st.session_state.mcp_initialized = False
             st.rerun()
