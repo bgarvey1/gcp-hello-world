@@ -36,7 +36,9 @@ async def start_mcp_server():
         args=[server_script],
     )
     
-    read_stream, write_stream = await stdio_client(server_params)
+    stdio_context = stdio_client(server_params)
+    read_stream, write_stream = await stdio_context.__aenter__()
+    
     session = ClientSession(read_stream, write_stream)
     
     await session.__aenter__()
